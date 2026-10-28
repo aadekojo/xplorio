@@ -1,2 +1,2 @@
-export * from "./types.js";
-export { MockFlightProvider } from "./mock/mockProvider.js";
+export * from "./types";
+export { MockFlightProvider } from "./mock/mockProvider";

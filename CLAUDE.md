@@ -44,13 +44,12 @@ AeroDataBox free Basic plan: **600 API units and 2,400 requests per month, 1 req
 ## Repo layout
 
 ```
-apps/app/            Expo app (placeholder until step 5)
-apps/api/            Azure Functions API; build.mjs bundles to dist/index.js
+apps/app/            Expo Router + Tamagui app: src/app (routes), src/components, src/lib
+apps/api/            Azure Functions API: routes.ts (handlers), flightService.ts, store.ts (interface + in-memory), cosmosStore.ts (Cosmos DB), dev-server.ts (local), functions/ (Azure registration); build.mjs bundles to dist/index.js
 packages/core/       Domain types + zod schemas (schemas.ts), alert and polling rules (rules.ts)
 packages/providers/  FlightDataProvider interface + MockFlightProvider (AeroDataBox adapter next)
 packages/api-client/ Typed fetch client for the app
 packages/config/     Shared tsconfig
-apps/app/placeholder Coming-soon page + staticwebapp.config.json (security headers) until step 5
 infra/               main.bicep + modules/, env/prod.bicepparam + env/test.bicepparam, bootstrap/ (per-env setup, budget)
 .github/             ci.yml, infra.yml, deploy-api.yml, deploy-web.yml, codeql.yml (public only), dependabot.yml
 ```
@@ -60,9 +59,9 @@ infra/               main.bicep + modules/, env/prod.bicepparam + env/test.bicep
 ```sh
 corepack enable          # once, to get the pinned pnpm
 pnpm install
+pnpm dev                 # app :8081 + API dev server :7071, hot reload, mock data, in-memory store
 pnpm lint | pnpm typecheck | pnpm test | pnpm build
 pnpm format              # Prettier; CI runs format:check
-pnpm --filter @xplorio/api build && (cd apps/api && func start)   # local API on :7071
 ```
 
 CI (`.github/workflows/ci.yml`) runs format check, lint, typecheck, test and build, plus `pnpm audit --prod --audit-level high` and a gitleaks secret scan. All must pass before merging.
@@ -102,6 +101,13 @@ CI (`.github/workflows/ci.yml`) runs format check, lint, typecheck, test and bui
 - **GitHub's OIDC subject uses immutable IDs:** `repo:aadekojo@118394138/xplorio@1437499581:ref:refs/heads/main`, not `repo:aadekojo/xplorio:...`. A federated credential with the name-only form fails with AADSTS700213. `bootstrap.sh` uses the ID form (`GITHUB_OIDC_REPO`); the error message always shows the exact subject GitHub sent.
 - **Cosmos DB lives in Canada East, not Canada Central.** On 2026-10-28 Canada Central refused new Cosmos accounts ("high demand", ServiceUnavailable). `cosmosLocation = 'canadaeast'` in both param files; everything else stays in Canada Central. A region access request (aka.ms/cosmosdbquota) could move it back later, but moving an existing account means recreating it.
 - **Test never gets the Cosmos free tier** (one per subscription, prod has it); test runs serverless. Test always uses the mock flight provider.
+- **Tamagui v3 (config v6) syntax:** no `$` on tokens (`gap="4"`, `bg="background"`, `color="color-10"`), shorthands only for some props (`items`, `justify`, `self`, `rounded`, `text`), hover/press via clauses (`borderColor="border-color hover:border-color-hover"`), `Button variant="quiet"` instead of `chromeless`, coloured text by wrapping in `<Theme name="red">`. Runtime mode, no compiler plugin. See `apps/app/README.md`.
+- **Metro can't resolve `./x.js` to `./x.ts`.** Shared packages use extensionless relative imports. `apps/api` keeps `.js` imports (bundled by esbuild, not Metro).
+- **`npx expo install` needs Expo's version service;** if it's unreachable use `EXPO_OFFLINE=1 npx expo install <pkg>`.
+- **API handlers are framework-neutral** (`routes.ts`): Azure Functions (`functions/flights.ts`) and the local dev server (`dev-server.ts`) both call them. Add new endpoints to `routes` only.
+- **Storage:** the API uses Cosmos DB (`cosmosStore.ts`) whenever `COSMOS_ENDPOINT` is set, which it always is in Azure, and the in-memory store otherwise (`pnpm dev`). `GET /api/health` reports which (`"store":"cosmos"`). Containers: `trackedFlights` (pk `/userId`), `flightCache` (pk `/flightKey`, per-document TTL 30 days after arrival). Store behaviour is tested once for both implementations in `store.test.ts`, with Cosmos backed by `testing/fakeCosmos.ts`.
+- **No auth yet:** `auth.ts` returns `demo-user` for every caller, so the deployed app is one shared list until step 4.
+- **Web build:** `EXPO_PUBLIC_API_URL` is baked in at build time (deploy-web looks up the Function App host). `apps/app/public/staticwebapp.config.json` carries CSP, HSTS and the SPA fallback; `connect-src` allows `https://*.azurewebsites.net`.
 - **Working in the owner's folder from Claude:** file deletion is not permitted there. Don't delete files; tell the owner what to remove. The owner runs git commits and pushes.
 
 ## Build order
@@ -123,7 +129,9 @@ _Last updated: 2026-10-28_
 
 - **Done:** Step 1. Monorepo scaffolded and verified, pushed to `github.com/aadekojo/xplorio` (private).
 - **Also done early:** `packages/core` schemas and rules (alert detection, polling schedule) with tests; `packages/providers` interface and mock provider; `/api/health` endpoint; typed api-client stub.
-- **Step 2 code written, not yet deployed:** Bicep (compiles, lints clean for both environments), `bootstrap.sh` (shellcheck clean), `infra.yml`, `deploy-api.yml`, `deploy-web.yml`, placeholder page. Two environments (prod, test) in one subscription, two resource groups.
-- **Next (owner):** create the `xplorio` subscription, run `bootstrap.sh` with `ENVIRONMENT=prod`, then Infrastructure > Deploy web > Cloudflare CNAME `xp` > `bindCustomDomain = true` > Deploy API. Steps in `infra/README.md`. Test is set up later ("Turning on test later" in `infra/README.md`).
-- **Then:** Step 3, AeroDataBox adapter.
-- **Open items:** Remove the leftover `../xplorio-scaffold.tgz` archive in `01-projects`.
+- **Step 2 deploying (as of 2026-10-28):** owner ran bootstrap for prod, fixed OIDC subject and moved Cosmos to Canada East; Infrastructure run, Cloudflare CNAME `xp` and `bindCustomDomain` were in progress. Confirm with the owner whether prod infra, web and API deploys are green.
+- **Step 5 started early (before auth, by choice):** Expo Router + Tamagui app with My flights, Add flight and Flight detail screens; API endpoints `GET/POST /api/flights`, `GET/DELETE /api/flights/{id}` on the mock provider; local `pnpm dev`. Owner is designing on mock data; AeroDataBox key not needed yet.
+- **Saving in Cosmos DB done (code):** `CosmosFlightStore` with managed identity; used automatically in Azure. Not yet verified against the live account.
+- **Tooling:** owner is on pnpm 12 (`packageManager` pinned). pnpm's default 1-day `minimumReleaseAge` applies; today's Expo/Tamagui releases are listed in `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` (can be removed once they're over a day old). `allowBuilds: esbuild: true`.
+- **Next:** push and check `https://<function app>/api/health` shows `"store":"cosmos"`; then auth (step 4).
+- **Open items:** Remove the leftover `../xplorio-scaffold.tgz` archive in `01-projects` and the old `apps/app/placeholder/` folder.

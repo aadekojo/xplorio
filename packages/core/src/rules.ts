@@ -1,4 +1,4 @@
-import type { Flight, FlightEndpoint } from "./schemas.js";
+import type { Flight, FlightEndpoint } from "./schemas";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;

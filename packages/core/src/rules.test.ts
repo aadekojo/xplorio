@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { detectChanges, flightKey, nextPollAt } from "./rules.js";
-import { AddFlightRequestSchema, type Flight } from "./schemas.js";
+import { detectChanges, flightKey, nextPollAt } from "./rules";
+import { AddFlightRequestSchema, type Flight } from "./schemas";
 
 const base: Flight = {
   flightKey: "AC262_2026-11-02",

@@ -115,3 +115,9 @@ export type Flight = z.infer<typeof FlightSchema>;
 export type AlertPrefs = z.infer<typeof AlertPrefsSchema>;
 export type TrackedFlight = z.infer<typeof TrackedFlightSchema>;
 export type AddFlightRequest = z.infer<typeof AddFlightRequestSchema>;
+
+/** What the API returns for a saved flight: the user's entry plus the latest known status. */
+export interface TrackedFlightView {
+  tracked: TrackedFlight;
+  flight: Flight | null;
+}
