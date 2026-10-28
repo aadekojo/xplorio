@@ -1,0 +1,4 @@
+{
+  "extends": "@xplorio/config/tsconfig.base.json",
+  "include": ["src"]
+}
