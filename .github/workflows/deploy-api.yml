@@ -1,5 +1,9 @@
 name: Deploy API
 
+# Pushes to main deploy to the environment in the AUTO_DEPLOY_ENV repo variable (prod when unset).
+# Later, set AUTO_DEPLOY_ENV=test so pushes land in test and prod becomes a manual run.
+# Manual runs (workflow_dispatch) can target either environment.
+
 on:
   push:
     branches: [main]
@@ -10,13 +14,18 @@ on:
       - "pnpm-lock.yaml"
       - ".github/workflows/deploy-api.yml"
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        type: choice
+        options: [prod, test]
+        default: prod
 
 permissions:
   contents: read
 
-concurrency:
-  group: deploy-api
-  cancel-in-progress: false
+env:
+  TARGET: ${{ inputs.environment || vars.AUTO_DEPLOY_ENV || 'prod' }}
 
 jobs:
   build:
@@ -50,14 +59,18 @@ jobs:
           retention-days: 7
 
   deploy:
-    name: Deploy to Azure Functions
+    name: Deploy to Azure Functions (${{ inputs.environment || vars.AUTO_DEPLOY_ENV || 'prod' }})
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: production
+    concurrency:
+      group: deploy-api-${{ inputs.environment || vars.AUTO_DEPLOY_ENV || 'prod' }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
+    env:
+      RG: ${{ vars[format('AZURE_RESOURCE_GROUP_{0}', inputs.environment || vars.AUTO_DEPLOY_ENV || 'prod')] }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -65,24 +78,22 @@ jobs:
 
       - uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          client-id: ${{ vars[format('AZURE_CLIENT_ID_{0}', env.TARGET)] }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Find the function app
         id: app
         run: |
-          name=$(az functionapp list -g "${{ vars.AZURE_RESOURCE_GROUP }}" --query "[0].name" -o tsv)
-          host=$(az functionapp show -g "${{ vars.AZURE_RESOURCE_GROUP }}" -n "$name" --query defaultHostName -o tsv)
+          name=$(az functionapp list -g "$RG" --query "[0].name" -o tsv)
+          host=$(az functionapp show -g "$RG" -n "$name" --query defaultHostName -o tsv)
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "host=$host" >> "$GITHUB_OUTPUT"
 
       - name: Deploy package
         run: |
           az functionapp deployment source config-zip \
-            -g "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            -n "${{ steps.app.outputs.name }}" \
-            --src api.zip
+            -g "$RG" -n "${{ steps.app.outputs.name }}" --src api.zip
 
       - name: Smoke test /api/health
         run: |

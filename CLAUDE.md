@@ -8,26 +8,27 @@ A personal flight tracker inspired by Flighty: add a flight by number and date, 
 
 - **Owner:** Adekojo Abimbola (GitHub `aadekojo`)
 - **Working name:** Xplorio (may be renamed; keep the name in few places, see Conventions)
-- **URL:** https://xp.example.com (Cloudflare DNS for `example.com`)
+- **URLs:** prod https://xp.example.com, test https://xp-test.example.com (Cloudflare DNS for `example.com`)
 - **Repo:** private GitHub repo, local copy at `~/Documents/01-projects/Xplorio`
 - **Design doc:** [Flight Tracker MVP Design](https://claude.ai/artifact/T6WnBzDmydtAScruB8cvqE) (scope, architecture diagram, data model, security, costs)
 
 ## Decisions made
 
-| Topic        | Decision                                                                                            |
-| ------------ | --------------------------------------------------------------------------------------------------- |
-| Platform     | **Web app only for now.** iOS is on the back burner, but the code must stay iOS-ready (Expo).       |
-| Repo         | One pnpm + Turborepo monorepo so web and (later) iOS share one codebase                             |
-| App          | Expo + Expo Router + react-native-web, styled with **Tamagui**                                      |
-| API          | Azure Functions (Flex Consumption), Node 22, TypeScript, v4 programming model, bundled with esbuild |
-| Database     | Cosmos DB for NoSQL, **free tier**, Canada Central                                                  |
-| Auth         | Microsoft Entra External ID, **email one-time code**, invite-only sign-up                           |
-| Secrets      | Azure Key Vault + Function App managed identity                                                     |
-| Hosting      | Azure Static Web Apps (Free) behind Cloudflare                                                      |
-| IaC / deploy | Bicep in `infra/`, GitHub Actions with OIDC federated credentials (no stored Azure secrets)         |
-| Azure        | **Dedicated `xplorio` subscription**, resource group `rg-xplorio` in Canada Central                 |
-| Flight data  | AeroDataBox via API.Market, **free Basic plan** for testing, behind a provider adapter              |
-| Push alerts  | Web Push (VAPID)                                                                                    |
+| Topic        | Decision                                                                                                                                                                                                                                                                  |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Platform     | **Web app only for now.** iOS is on the back burner, but the code must stay iOS-ready (Expo).                                                                                                                                                                             |
+| Repo         | One pnpm + Turborepo monorepo so web and (later) iOS share one codebase                                                                                                                                                                                                   |
+| App          | Expo + Expo Router + react-native-web, styled with **Tamagui**                                                                                                                                                                                                            |
+| API          | Azure Functions (Flex Consumption), Node 22, TypeScript, v4 programming model, bundled with esbuild                                                                                                                                                                       |
+| Database     | Cosmos DB for NoSQL, **free tier**, Canada Central                                                                                                                                                                                                                        |
+| Auth         | Microsoft Entra External ID, **email one-time code**, invite-only sign-up                                                                                                                                                                                                 |
+| Secrets      | Azure Key Vault + Function App managed identity                                                                                                                                                                                                                           |
+| Hosting      | Azure Static Web Apps (Free) behind Cloudflare                                                                                                                                                                                                                            |
+| IaC / deploy | Bicep in `infra/`, GitHub Actions with OIDC federated credentials (no stored Azure secrets)                                                                                                                                                                               |
+| Azure        | **Dedicated `xplorio` subscription**, Canada Central, two resource groups: `rg-xplorio-prod`, `rg-xplorio-test`                                                                                                                                                           |
+| Environments | **prod** at `xp.example.com` is the only one in use; pushes to `main` auto-deploy to prod. **test** at `xp-test.example.com` is defined in code but not set up yet. Later: set repo variable `AUTO_DEPLOY_ENV=test` so pushes go to test and prod becomes manual-only |
+| Flight data  | AeroDataBox via API.Market, **free Basic plan** for testing, behind a provider adapter                                                                                                                                                                                    |
+| Push alerts  | Web Push (VAPID)                                                                                                                                                                                                                                                          |
 
 ## Flight data budget (important)
 
@@ -50,7 +51,7 @@ packages/providers/  FlightDataProvider interface + MockFlightProvider (AeroData
 packages/api-client/ Typed fetch client for the app
 packages/config/     Shared tsconfig
 apps/app/placeholder Coming-soon page + staticwebapp.config.json (security headers) until step 5
-infra/               main.bicep + modules/, main.bicepparam, bootstrap/ (one-time setup script, budget)
+infra/               main.bicep + modules/, env/prod.bicepparam + env/test.bicepparam, bootstrap/ (per-env setup, budget)
 .github/             ci.yml, infra.yml, deploy-api.yml, deploy-web.yml, codeql.yml (public only), dependabot.yml
 ```
 
@@ -97,12 +98,14 @@ CI (`.github/workflows/ci.yml`) runs format check, lint, typecheck, test and bui
 - **The deploy identity can only grant five specific roles** (ABAC condition set in `bootstrap.sh`). Adding a new role assignment in Bicep means adding its role ID to `ALLOWED_ROLES` there and re-running the script.
 - **A brand-new subscription has few resource providers registered**; `bootstrap.sh` registers them. The pipeline identity can't, since it only has resource-group rights.
 - **Key Vault has purge protection**, so a deleted vault's name stays reserved for 90 days.
+- **GitHub Free on a private repo has no environment variables, environment secrets or required reviewers.** So deploy settings are repo variables with `_PROD` / `_TEST` suffixes, both Azure identities trust only `main` (OIDC subject `ref:refs/heads/main`), and the push target comes from repo variable `AUTO_DEPLOY_ENV` (unset = prod). Once test exists, prod is protected by being manual-only (`workflow_dispatch` with `environment: prod`). Workflows read settings with `vars[format('AZURE_CLIENT_ID_{0}', env.TARGET)]`.
+- **Test never gets the Cosmos free tier** (one per subscription, prod has it); test runs serverless. Test always uses the mock flight provider.
 - **Working in the owner's folder from Claude:** file deletion is not permitted there. Don't delete files; tell the owner what to remove. The owner runs git commits and pushes.
 
 ## Build order
 
 1. Repo and pipeline (done)
-2. Infrastructure (code written, deploy pending): Bicep for Static Web App, Function App, Cosmos (free tier), Key Vault, App Insights; GitHub OIDC to Azure
+2. Infrastructure (code written, deploy pending): Bicep for Static Web App, Function App, Cosmos, Key Vault, App Insights per environment (prod + test); GitHub OIDC to Azure
 3. Core and providers: AeroDataBox adapter behind `FlightDataProvider`
 4. Auth: External ID tenant, app registration, invite allow-list, token validation middleware, sign-in screen
 5. Add and view a flight: Expo app with Tamagui, status card, flight list; first deploy to xp.example.com
@@ -118,7 +121,7 @@ _Last updated: 2026-10-28_
 
 - **Done:** Step 1. Monorepo scaffolded and verified, pushed to `github.com/aadekojo/xplorio` (private).
 - **Also done early:** `packages/core` schemas and rules (alert detection, polling schedule) with tests; `packages/providers` interface and mock provider; `/api/health` endpoint; typed api-client stub.
-- **Step 2 code written, not yet deployed:** Bicep (compiles, lints clean), `bootstrap.sh` (shellcheck clean), `infra.yml`, `deploy-api.yml`, `deploy-web.yml`, placeholder page.
-- **Next (owner):** create the `xplorio` subscription, run `bootstrap.sh`, then run Infrastructure > Deploy web > Cloudflare CNAME > `bindCustomDomain = true` > Deploy API. Steps in `infra/README.md`.
+- **Step 2 code written, not yet deployed:** Bicep (compiles, lints clean for both environments), `bootstrap.sh` (shellcheck clean), `infra.yml`, `deploy-api.yml`, `deploy-web.yml`, placeholder page. Two environments (prod, test) in one subscription, two resource groups.
+- **Next (owner):** create the `xplorio` subscription, run `bootstrap.sh` with `ENVIRONMENT=prod`, then Infrastructure > Deploy web > Cloudflare CNAME `xp` > `bindCustomDomain = true` > Deploy API. Steps in `infra/README.md`. Test is set up later ("Turning on test later" in `infra/README.md`).
 - **Then:** Step 3, AeroDataBox adapter.
-- **Open items:** Update the design doc's security section for the free-plan GitHub limits. Remove the leftover `../xplorio-scaffold.tgz` archive in `01-projects`.
+- **Open items:** Remove the leftover `../xplorio-scaffold.tgz` archive in `01-projects`.

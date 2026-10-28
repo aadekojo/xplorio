@@ -1,32 +1,45 @@
 #!/usr/bin/env bash
-# One-time setup for the dedicated Xplorio subscription. Run it yourself, signed in with `az login`
-# as an Owner of the subscription. Safe to re-run: every step checks before it creates.
+# One-time setup for one Xplorio environment (prod or test) in the dedicated Xplorio subscription.
+# Run it yourself, signed in with `az login` as an Owner of the subscription, once per environment.
+# Safe to re-run: every step checks before it creates.
 #
 # What it does:
 #   1. Registers the resource providers a brand-new subscription is missing
-#   2. Creates the resource group
-#   3. Creates the GitHub deploy identity (app registration + OIDC federated credential, no secret)
-#   4. Grants that identity rights on the resource group only, with a limit on which roles it can hand out
+#   2. Creates the environment's resource group (rg-xplorio-<env>)
+#   3. Creates that environment's own GitHub deploy identity (app registration + OIDC federated
+#      credential, no secret). It trusts only workflow runs on the main branch.
+#   4. Grants that identity rights on its own resource group only, with a limit on which roles it can hand out
 #   5. Lets you (the signed-in user) manage Key Vault secrets in that resource group
-#   6. Creates a monthly budget alert on the subscription
-#   7. Creates the GitHub "production" environment and repo variables (if the gh CLI is installed)
+#   6. Creates one monthly budget alert on the subscription (shared by both environments)
+#   7. Sets the GitHub repo variables the workflows read (if the gh CLI is installed and signed in)
 #
 # Usage:
-#   SUBSCRIPTION_ID=<id> ALERT_EMAIL=<you@example.com> ./infra/bootstrap/bootstrap.sh
+#   ENVIRONMENT=prod SUBSCRIPTION_ID=<id> ALERT_EMAIL=<you@example.com> ./infra/bootstrap/bootstrap.sh
+#   ENVIRONMENT=test SUBSCRIPTION_ID=<id> ALERT_EMAIL=<you@example.com> ./infra/bootstrap/bootstrap.sh
 
 set -euo pipefail
 
-: "${SUBSCRIPTION_ID:?Set SUBSCRIPTION_ID to the new Xplorio subscription ID}"
+: "${ENVIRONMENT:?Set ENVIRONMENT to prod or test}"
+: "${SUBSCRIPTION_ID:?Set SUBSCRIPTION_ID to the Xplorio subscription ID}"
 : "${ALERT_EMAIL:?Set ALERT_EMAIL to the address that should get budget alerts}"
+if [[ "$ENVIRONMENT" != "prod" && "$ENVIRONMENT" != "test" ]]; then
+  echo "ENVIRONMENT must be prod or test" >&2
+  exit 1
+fi
+
 GITHUB_REPO="${GITHUB_REPO:-aadekojo/xplorio}"
 LOCATION="${LOCATION:-canadacentral}"
-RESOURCE_GROUP="${RESOURCE_GROUP:-rg-xplorio}"
+RESOURCE_GROUP="rg-xplorio-${ENVIRONMENT}"
 BUDGET_AMOUNT="${BUDGET_AMOUNT:-10}"
-APP_REG_NAME="github-${GITHUB_REPO//\//-}-deploy"
-GH_ENVIRONMENT="production"
+APP_REG_NAME="github-xplorio-${ENVIRONMENT}-deploy"
+ENV_UPPER="$(printf '%s' "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')"
+
+# GitHub Free doesn't offer environment-scoped variables or approval gates on private repos, so both
+# identities trust pushes and manual runs on main; each can still only reach its own resource group.
+SUBJECT="repo:${GITHUB_REPO}:ref:refs/heads/main"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-step() { printf '\n==> %s\n' "$*"; }
+step() { printf '\n==> [%s] %s\n' "$ENVIRONMENT" "$*"; }
 
 step "Selecting subscription $SUBSCRIPTION_ID"
 az account set --subscription "$SUBSCRIPTION_ID"
@@ -55,7 +68,7 @@ echo "  ok"
 
 step "Creating resource group $RESOURCE_GROUP in $LOCATION"
 az group create --name "$RESOURCE_GROUP" --location "$LOCATION" \
-  --tags app=xplorio managedBy=bicep --output none
+  --tags app=xplorio environment="$ENVIRONMENT" managedBy=bicep --output none
 RG_ID="$(az group show --name "$RESOURCE_GROUP" --query id -o tsv)"
 
 step "Creating the GitHub deploy identity ($APP_REG_NAME)"
@@ -72,15 +85,13 @@ if ! az ad sp show --id "$CLIENT_ID" --output none 2>/dev/null; then
 fi
 SP_OBJECT_ID="$(az ad sp show --id "$CLIENT_ID" --query id -o tsv)"
 
-# Only workflow jobs that run in the GitHub "production" environment can get a token.
-SUBJECT="repo:${GITHUB_REPO}:environment:${GH_ENVIRONMENT}"
 if ! az ad app federated-credential list --id "$CLIENT_ID" --query "[?subject=='$SUBJECT']" -o tsv | grep -q .; then
   az ad app federated-credential create --id "$CLIENT_ID" --parameters "{
-    \"name\": \"github-${GH_ENVIRONMENT}\",
+    \"name\": \"github-main\",
     \"issuer\": \"https://token.actions.githubusercontent.com\",
     \"subject\": \"${SUBJECT}\",
     \"audiences\": [\"api://AzureADTokenExchange\"],
-    \"description\": \"GitHub Actions deploys from ${GITHUB_REPO} (${GH_ENVIRONMENT} environment)\"
+    \"description\": \"GitHub Actions on main in ${GITHUB_REPO}, deploying ${ENVIRONMENT}\"
   }" --output none
   echo "  added federated credential for $SUBJECT"
 else
@@ -123,7 +134,7 @@ else
   echo "  assigned 'Key Vault Secrets Officer' to you"
 fi
 
-step "Creating a ${BUDGET_AMOUNT}/month budget alert on the subscription"
+step "Making sure the subscription has a ${BUDGET_AMOUNT}/month budget alert"
 if az consumption budget show --budget-name xplorio-monthly --output none 2>/dev/null; then
   echo "  budget exists"
 else
@@ -136,28 +147,26 @@ else
   echo "  budget starts $START_DATE"
 fi
 
-step "Configuring GitHub ($GITHUB_REPO)"
+step "Setting GitHub repo variables ($GITHUB_REPO)"
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  gh api --method PUT "repos/${GITHUB_REPO}/environments/${GH_ENVIRONMENT}" --silent
-  gh variable set AZURE_CLIENT_ID --repo "$GITHUB_REPO" --body "$CLIENT_ID"
   gh variable set AZURE_TENANT_ID --repo "$GITHUB_REPO" --body "$TENANT_ID"
   gh variable set AZURE_SUBSCRIPTION_ID --repo "$GITHUB_REPO" --body "$SUBSCRIPTION_ID"
-  gh variable set AZURE_RESOURCE_GROUP --repo "$GITHUB_REPO" --body "$RESOURCE_GROUP"
-  echo "  environment '$GH_ENVIRONMENT' and four repo variables set"
+  gh variable set "AZURE_CLIENT_ID_${ENV_UPPER}" --repo "$GITHUB_REPO" --body "$CLIENT_ID"
+  gh variable set "AZURE_RESOURCE_GROUP_${ENV_UPPER}" --repo "$GITHUB_REPO" --body "$RESOURCE_GROUP"
+  echo "  set AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_CLIENT_ID_${ENV_UPPER}, AZURE_RESOURCE_GROUP_${ENV_UPPER}"
 else
   cat <<EOF
-  gh CLI not found or not signed in. In GitHub, open the repo's Settings and:
-    1. Environments > New environment > "${GH_ENVIRONMENT}"
-    2. Secrets and variables > Actions > Variables > add:
-         AZURE_CLIENT_ID        = ${CLIENT_ID}
-         AZURE_TENANT_ID        = ${TENANT_ID}
-         AZURE_SUBSCRIPTION_ID  = ${SUBSCRIPTION_ID}
-         AZURE_RESOURCE_GROUP   = ${RESOURCE_GROUP}
+  gh CLI not found or not signed in. In GitHub: repo Settings > Secrets and variables > Actions >
+  Variables tab, add (or confirm) these repository variables:
+    AZURE_TENANT_ID                 = ${TENANT_ID}
+    AZURE_SUBSCRIPTION_ID           = ${SUBSCRIPTION_ID}
+    AZURE_CLIENT_ID_${ENV_UPPER}    = ${CLIENT_ID}
+    AZURE_RESOURCE_GROUP_${ENV_UPPER} = ${RESOURCE_GROUP}
 EOF
 fi
 
 step "Done"
 cat <<EOF
 These IDs are identifiers, not secrets; nothing secret was created.
-Next: run the "Infrastructure" workflow in GitHub Actions (or push a change under infra/).
+Next: GitHub > Actions > Infrastructure > Run workflow, choosing "${ENVIRONMENT}".
 EOF
