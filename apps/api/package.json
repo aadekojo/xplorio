@@ -21,7 +21,7 @@
     "@xplorio/providers": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.20.0",
+    "@types/node": "^26.6.5",
     "@xplorio/config": "workspace:*",
     "esbuild": "^0.28.0",
     "tsx": "^4.23.0",
