@@ -1,0 +1,9 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FLIGHT_PROVIDER": "mock",
+    "ALLOWED_ORIGIN": "http://localhost:8081"
+  }
+}
