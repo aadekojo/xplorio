@@ -1,5 +1,9 @@
 name: Infrastructure
 
+# Pushes to main deploy to the environment in the AUTO_DEPLOY_ENV repo variable (prod when unset).
+# Later, set AUTO_DEPLOY_ENV=test so pushes land in test and prod becomes a manual run.
+# Manual runs (workflow_dispatch) can target either environment.
+
 on:
   pull_request:
     paths: ["infra/**", ".github/workflows/infra.yml"]
@@ -7,13 +11,18 @@ on:
     branches: [main]
     paths: ["infra/**", ".github/workflows/infra.yml"]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        type: choice
+        options: [prod, test]
+        default: prod
 
 permissions:
   contents: read
 
-concurrency:
-  group: infra
-  cancel-in-progress: false
+env:
+  TARGET: ${{ inputs.environment || vars.AUTO_DEPLOY_ENV || 'prod' }}
 
 jobs:
   validate:
@@ -24,17 +33,22 @@ jobs:
       - uses: actions/checkout@v5
       - run: az bicep install
       - run: az bicep build --file infra/main.bicep --stdout > /dev/null
-      - run: az bicep build-params --file infra/main.bicepparam --stdout > /dev/null
       - run: az bicep lint --file infra/main.bicep
+      - run: |
+          for f in infra/env/*.bicepparam; do
+            echo "checking $f"
+            az bicep build-params --file "$f" --stdout > /dev/null
+          done
 
   deploy:
-    name: What-if and deploy
+    name: What-if and deploy (${{ inputs.environment || vars.AUTO_DEPLOY_ENV || 'prod' }})
     if: github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The Azure identity only trusts jobs in this environment (see infra/bootstrap/bootstrap.sh).
-    environment: production
+    concurrency:
+      group: infra-${{ inputs.environment || vars.AUTO_DEPLOY_ENV || 'prod' }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
@@ -43,36 +57,39 @@ jobs:
 
       - uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          client-id: ${{ vars[format('AZURE_CLIENT_ID_{0}', env.TARGET)] }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: What-if
+        env:
+          RG: ${{ vars[format('AZURE_RESOURCE_GROUP_{0}', env.TARGET)] }}
         run: |
           az deployment group what-if \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --resource-group "$RG" \
             --template-file infra/main.bicep \
-            --parameters infra/main.bicepparam \
+            --parameters "infra/env/${TARGET}.bicepparam" \
             --result-format ResourceIdOnly
 
       - name: Deploy
-        id: deploy
+        env:
+          RG: ${{ vars[format('AZURE_RESOURCE_GROUP_{0}', env.TARGET)] }}
         run: |
           az deployment group create \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "xplorio-${{ github.run_number }}" \
+            --resource-group "$RG" \
+            --name "xplorio-${TARGET}-${{ github.run_number }}" \
             --template-file infra/main.bicep \
-            --parameters infra/main.bicepparam \
+            --parameters "infra/env/${TARGET}.bicepparam" \
             --query properties.outputs -o json > outputs.json
 
       - name: Summary
         run: |
           {
-            echo "### Deployed"
+            echo "### Deployed ${TARGET}"
             echo ""
             echo "| Output | Value |"
             echo "| --- | --- |"
             jq -r 'to_entries[] | "| \(.key) | `\(.value.value)` |"' outputs.json
             echo ""
-            echo "Point the Cloudflare CNAME for \`xp\` at the staticWebAppHostname above."
+            echo "Point this environment's Cloudflare CNAME at the staticWebAppHostname above."
           } >> "$GITHUB_STEP_SUMMARY"

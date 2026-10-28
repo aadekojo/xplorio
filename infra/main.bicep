@@ -1,12 +1,17 @@
-// Xplorio: every Azure resource the app needs, deployed into one resource group
-// inside the dedicated Xplorio subscription. Deployed by .github/workflows/infra.yml.
+// Xplorio: every Azure resource one environment needs, deployed into that environment's
+// resource group (rg-xplorio-prod or rg-xplorio-test) inside the dedicated Xplorio subscription.
+// Deployed by .github/workflows/infra.yml with infra/env/<environment>.bicepparam.
 
 targetScope = 'resourceGroup'
 
 @description('Short app name used in every resource name. Changing it renames everything.')
 @minLength(3)
-@maxLength(12)
+@maxLength(9)
 param appName string = 'xplorio'
+
+@description('Which environment this deployment is. Part of every resource name.')
+@allowed(['prod', 'test'])
+param environmentName string
 
 @description('Region for data and compute. Keeps user data in Canada.')
 param location string = resourceGroup().location
@@ -15,8 +20,8 @@ param location string = resourceGroup().location
 @allowed(['centralus', 'eastus2', 'westus2', 'westeurope', 'eastasia'])
 param staticWebAppLocation string = 'centralus'
 
-@description('Public URL of the web app.')
-param customDomain string = 'xp.adekojo.cloud'
+@description('Public hostname of this environment, e.g. xp.adekojo.cloud or xp-test.adekojo.cloud.')
+param customDomain string
 
 @description('Bind the custom domain. Set true only after the Cloudflare CNAME points at the Static Web App.')
 param bindCustomDomain bool = false
@@ -30,19 +35,22 @@ param flightProvider string = 'mock'
 var suffix = take(uniqueString(resourceGroup().id), 6)
 var tags = {
   app: appName
+  environment: environmentName
   managedBy: 'bicep'
 }
 
+// <type>-<app>-<env>[-<hash>]; the hash keeps globally unique names unique. Key Vault names max out at 24.
+var base = '${appName}-${environmentName}'
 var names = {
-  identity: 'id-${appName}-api'
-  logAnalytics: 'log-${appName}'
-  appInsights: 'appi-${appName}'
-  cosmos: 'cosmos-${appName}-${suffix}'
-  keyVault: 'kv-${appName}-${suffix}'
-  storage: take('st${appName}${suffix}', 24)
-  plan: 'plan-${appName}'
-  functionApp: 'func-${appName}-${suffix}'
-  staticWebApp: 'swa-${appName}'
+  identity: 'id-${base}-api'
+  logAnalytics: 'log-${base}'
+  appInsights: 'appi-${base}'
+  cosmos: 'cosmos-${base}-${suffix}'
+  keyVault: 'kv-${base}-${suffix}'
+  storage: 'st${appName}${environmentName}${suffix}'
+  plan: 'plan-${base}'
+  functionApp: 'func-${base}-${suffix}'
+  staticWebApp: 'swa-${base}'
 }
 
 // The API's single identity: storage, telemetry, Cosmos data and Key Vault secrets.
@@ -121,6 +129,7 @@ module functions 'modules/functions.bicep' = {
   }
 }
 
+output environmentName string = environmentName
 output functionAppName string = functions.outputs.name
 output apiHostname string = functions.outputs.defaultHostname
 output staticWebAppName string = staticWebApp.outputs.name
