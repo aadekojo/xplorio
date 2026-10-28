@@ -4,7 +4,7 @@ param environmentName = 'prod'
 param customDomain = 'xp.adekojo.cloud'
 
 // Flip to true once the Cloudflare CNAME for xp points at this environment's Static Web App.
-param bindCustomDomain = false
+param bindCustomDomain = true
 
 // Prod gets the subscription's one free-tier Cosmos account.
 param cosmosEnableFreeTier = true
