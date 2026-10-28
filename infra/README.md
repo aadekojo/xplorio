@@ -1,6 +1,6 @@
 # infra
 
-Everything Xplorio runs on, as Bicep, in a **dedicated Azure subscription** with room for **two environments**, each in its own resource group in Canada Central. **Only prod is in use for now**; test is defined in code and gets set up later with one bootstrap run. GitHub Actions deploys with OIDC, so no Azure secrets are stored in GitHub.
+Everything Xplorio runs on, as Bicep, in a **dedicated Azure subscription** with room for **two environments**, each in its own resource group in Canada Central (Cosmos DB in Canada East, because Canada Central was refusing new Cosmos accounts). **Only prod is in use for now**; test is defined in code and gets set up later with one bootstrap run. GitHub Actions deploys with OIDC, so no Azure secrets are stored in GitHub.
 
 ## Environments
 
@@ -78,7 +78,7 @@ From then on, pushes land in test at `xp-test.example.com`, and prod only change
 
 Each environment's identity:
 
-- Is trusted only for workflow runs on `main` (OIDC subject `repo:aadekojo/xplorio:ref:refs/heads/main`). Pull requests and other branches can't get a token.
+- Is trusted only for workflow runs on `main` (OIDC subject `repo:aadekojo@118394138/xplorio@1437499581:ref:refs/heads/main`, GitHub's immutable-ID form). Pull requests and other branches can't get a token.
 - Has **Contributor** on its own resource group only.
 - Has **Role Based Access Control Administrator** on its own resource group, limited by a condition to granting five roles: Storage Blob Data Owner, Storage Queue Data Contributor, Storage Table Data Contributor, Monitoring Metrics Publisher and Key Vault Secrets User. It can never grant Owner.
 

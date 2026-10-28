@@ -16,6 +16,9 @@ param environmentName string
 @description('Region for data and compute. Keeps user data in Canada.')
 param location string = resourceGroup().location
 
+@description('Region for Cosmos DB. Separate because Canada Central sometimes refuses new Cosmos accounts on capacity; Canada East keeps data in Canada.')
+param cosmosLocation string = location
+
 @description('Static Web Apps is not offered in Canada; this region only holds its metadata.')
 @allowed(['centralus', 'eastus2', 'westus2', 'westeurope', 'eastasia'])
 param staticWebAppLocation string = 'centralus'
@@ -83,7 +86,7 @@ module staticWebApp 'modules/staticwebapp.bicep' = {
 module cosmos 'modules/cosmos.bicep' = {
   name: 'cosmos'
   params: {
-    location: location
+    location: cosmosLocation
     accountName: names.cosmos
     databaseName: appName
     tags: tags

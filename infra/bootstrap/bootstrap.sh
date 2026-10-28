@@ -36,7 +36,11 @@ ENV_UPPER="$(printf '%s' "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')"
 
 # GitHub Free doesn't offer environment-scoped variables or approval gates on private repos, so both
 # identities trust pushes and manual runs on main; each can still only reach its own resource group.
-SUBJECT="repo:${GITHUB_REPO}:ref:refs/heads/main"
+# GitHub sends the repo in its immutable-ID form (owner@ownerId/repo@repoId), so the subject must match
+# that exactly. Override GITHUB_OIDC_REPO if the repo is ever renamed, transferred or recreated; the
+# failing login's error message shows the subject GitHub actually sent.
+GITHUB_OIDC_REPO="${GITHUB_OIDC_REPO:-aadekojo@118394138/xplorio@1437499581}"
+SUBJECT="repo:${GITHUB_OIDC_REPO}:ref:refs/heads/main"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 step() { printf '\n==> [%s] %s\n' "$ENVIRONMENT" "$*"; }
@@ -87,7 +91,7 @@ SP_OBJECT_ID="$(az ad sp show --id "$CLIENT_ID" --query id -o tsv)"
 
 if ! az ad app federated-credential list --id "$CLIENT_ID" --query "[?subject=='$SUBJECT']" -o tsv | grep -q .; then
   az ad app federated-credential create --id "$CLIENT_ID" --parameters "{
-    \"name\": \"github-main\",
+    \"name\": \"github-main-ids\",
     \"issuer\": \"https://token.actions.githubusercontent.com\",
     \"subject\": \"${SUBJECT}\",
     \"audiences\": [\"api://AzureADTokenExchange\"],

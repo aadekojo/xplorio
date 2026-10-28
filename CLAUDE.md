@@ -10,7 +10,7 @@ A personal flight tracker inspired by Flighty: add a flight by number and date, 
 - **Working name:** Xplorio (may be renamed; keep the name in few places, see Conventions)
 - **URLs:** prod https://xp.example.com, test https://xp-test.example.com (Cloudflare DNS for `example.com`)
 - **Repo:** private GitHub repo, local copy at `~/Documents/01-projects/Xplorio`
-- **Design doc:** [Flight Tracker MVP Design](https://claude.ai/artifact/T6WnBzDmydtAScruB8cvqE) (scope, architecture diagram, data model, security, costs)
+- **Design doc:** [Flight Tracker MVP Design](https://claude.ai/artifact/T6WnBzDmydtAScruB8cvqE) (scope, architecture diagram, data model, security, costs). **Don't update the design doc unless the owner asks.**
 
 ## Decisions made
 
@@ -98,7 +98,9 @@ CI (`.github/workflows/ci.yml`) runs format check, lint, typecheck, test and bui
 - **The deploy identity can only grant five specific roles** (ABAC condition set in `bootstrap.sh`). Adding a new role assignment in Bicep means adding its role ID to `ALLOWED_ROLES` there and re-running the script.
 - **A brand-new subscription has few resource providers registered**; `bootstrap.sh` registers them. The pipeline identity can't, since it only has resource-group rights.
 - **Key Vault has purge protection**, so a deleted vault's name stays reserved for 90 days.
-- **GitHub Free on a private repo has no environment variables, environment secrets or required reviewers.** So deploy settings are repo variables with `_PROD` / `_TEST` suffixes, both Azure identities trust only `main` (OIDC subject `ref:refs/heads/main`), and the push target comes from repo variable `AUTO_DEPLOY_ENV` (unset = prod). Once test exists, prod is protected by being manual-only (`workflow_dispatch` with `environment: prod`). Workflows read settings with `vars[format('AZURE_CLIENT_ID_{0}', env.TARGET)]`.
+- **GitHub Free on a private repo has no environment variables, environment secrets or required reviewers.** So deploy settings are repo variables with `_PROD` / `_TEST` suffixes, both Azure identities trust only `main`, and the push target comes from repo variable `AUTO_DEPLOY_ENV` (unset = prod). Once test exists, prod is protected by being manual-only (`workflow_dispatch` with `environment: prod`). Workflows read settings with `vars[format('AZURE_CLIENT_ID_{0}', env.TARGET)]`.
+- **GitHub's OIDC subject uses immutable IDs:** `repo:aadekojo@118394138/xplorio@1437499581:ref:refs/heads/main`, not `repo:aadekojo/xplorio:...`. A federated credential with the name-only form fails with AADSTS700213. `bootstrap.sh` uses the ID form (`GITHUB_OIDC_REPO`); the error message always shows the exact subject GitHub sent.
+- **Cosmos DB lives in Canada East, not Canada Central.** On 2026-10-28 Canada Central refused new Cosmos accounts ("high demand", ServiceUnavailable). `cosmosLocation = 'canadaeast'` in both param files; everything else stays in Canada Central. A region access request (aka.ms/cosmosdbquota) could move it back later, but moving an existing account means recreating it.
 - **Test never gets the Cosmos free tier** (one per subscription, prod has it); test runs serverless. Test always uses the mock flight provider.
 - **Working in the owner's folder from Claude:** file deletion is not permitted there. Don't delete files; tell the owner what to remove. The owner runs git commits and pushes.
 
