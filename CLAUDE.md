@@ -25,6 +25,7 @@ A personal flight tracker inspired by Flighty: add a flight by number and date, 
 | Secrets      | Azure Key Vault + Function App managed identity                                                     |
 | Hosting      | Azure Static Web Apps (Free) behind Cloudflare                                                      |
 | IaC / deploy | Bicep in `infra/`, GitHub Actions with OIDC federated credentials (no stored Azure secrets)         |
+| Azure        | **Dedicated `xplorio` subscription**, resource group `rg-xplorio` in Canada Central                 |
 | Flight data  | AeroDataBox via API.Market, **free Basic plan** for testing, behind a provider adapter              |
 | Push alerts  | Web Push (VAPID)                                                                                    |
 
@@ -48,8 +49,9 @@ packages/core/       Domain types + zod schemas (schemas.ts), alert and polling 
 packages/providers/  FlightDataProvider interface + MockFlightProvider (AeroDataBox adapter next)
 packages/api-client/ Typed fetch client for the app
 packages/config/     Shared tsconfig
-infra/               Bicep (placeholder until step 2)
-.github/             ci.yml, codeql.yml (public repos only), dependabot.yml
+apps/app/placeholder Coming-soon page + staticwebapp.config.json (security headers) until step 5
+infra/               main.bicep + modules/, main.bicepparam, bootstrap/ (one-time setup script, budget)
+.github/             ci.yml, infra.yml, deploy-api.yml, deploy-web.yml, codeql.yml (public only), dependabot.yml
 ```
 
 ## Commands
@@ -89,12 +91,18 @@ CI (`.github/workflows/ci.yml`) runs format check, lint, typecheck, test and bui
 - **esbuild** needs its install script, allowed via `pnpm.onlyBuiltDependencies` in the root `package.json`.
 - **Cosmos free tier** must be enabled when the account is created; it can't be turned on later.
 - **Cloudflare + Static Web Apps custom domain:** keep the `xp` CNAME DNS-only (grey cloud) until Azure validates the domain and issues the certificate, then proxy it.
+- **Static Web Apps isn't offered in Canadian regions.** Its metadata lives in Central US; it stores only static files, no user data. Everything else is in Canada Central.
+- **Flex Consumption apps take no `FUNCTIONS_WORKER_RUNTIME` / `FUNCTIONS_EXTENSION_VERSION` settings**; the runtime is set in `functionAppConfig`. Max instance count can't go below 40.
+- **Keys are off everywhere** (storage shared keys, Cosmos local auth, App Insights local auth). New code must use `DefaultAzureCredential` with `AZURE_CLIENT_ID` (the user-assigned identity).
+- **The deploy identity can only grant five specific roles** (ABAC condition set in `bootstrap.sh`). Adding a new role assignment in Bicep means adding its role ID to `ALLOWED_ROLES` there and re-running the script.
+- **A brand-new subscription has few resource providers registered**; `bootstrap.sh` registers them. The pipeline identity can't, since it only has resource-group rights.
+- **Key Vault has purge protection**, so a deleted vault's name stays reserved for 90 days.
 - **Working in the owner's folder from Claude:** file deletion is not permitted there. Don't delete files; tell the owner what to remove. The owner runs git commits and pushes.
 
 ## Build order
 
-1. Repo and pipeline
-2. Infrastructure: Bicep for Static Web App, Function App, Cosmos (free tier), Key Vault, App Insights; GitHub OIDC to Azure
+1. Repo and pipeline (done)
+2. Infrastructure (code written, deploy pending): Bicep for Static Web App, Function App, Cosmos (free tier), Key Vault, App Insights; GitHub OIDC to Azure
 3. Core and providers: AeroDataBox adapter behind `FlightDataProvider`
 4. Auth: External ID tenant, app registration, invite allow-list, token validation middleware, sign-in screen
 5. Add and view a flight: Expo app with Tamagui, status card, flight list; first deploy to xp.example.com
@@ -108,8 +116,9 @@ CI (`.github/workflows/ci.yml`) runs format check, lint, typecheck, test and bui
 
 _Last updated: 2026-10-28_
 
-- **Done:** Step 1. Monorepo scaffolded and verified (format, lint, typecheck, 14 tests, API build, clean audit). Initial commit made on `main`.
+- **Done:** Step 1. Monorepo scaffolded and verified, pushed to `github.com/aadekojo/xplorio` (private).
 - **Also done early:** `packages/core` schemas and rules (alert detection, polling schedule) with tests; `packages/providers` interface and mock provider; `/api/health` endpoint; typed api-client stub.
-- **In progress:** Pushing to the private GitHub repo.
-- **Next:** Step 2, infrastructure (Bicep + OIDC deploy workflows).
+- **Step 2 code written, not yet deployed:** Bicep (compiles, lints clean), `bootstrap.sh` (shellcheck clean), `infra.yml`, `deploy-api.yml`, `deploy-web.yml`, placeholder page.
+- **Next (owner):** create the `xplorio` subscription, run `bootstrap.sh`, then run Infrastructure > Deploy web > Cloudflare CNAME > `bindCustomDomain = true` > Deploy API. Steps in `infra/README.md`.
+- **Then:** Step 3, AeroDataBox adapter.
 - **Open items:** Update the design doc's security section for the free-plan GitHub limits. Remove the leftover `../xplorio-scaffold.tgz` archive in `01-projects`.

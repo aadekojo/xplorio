@@ -44,8 +44,8 @@ Development uses the **mock flight provider** by default (`FLIGHT_PROVIDER=mock`
 
 ## Build order
 
-1. Repo and pipeline <- done
-2. Infrastructure (Bicep, OIDC deploys)
+1. Repo and pipeline (done)
+2. Infrastructure (Bicep, OIDC deploys): code in infra/, see infra/README.md
 3. Core and providers (AeroDataBox adapter)
 4. Auth (Entra External ID, email one-time code, invite-only)
 5. Add and view a flight - first deploy to xp.example.com
