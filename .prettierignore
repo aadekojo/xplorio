@@ -3,3 +3,6 @@ dist
 coverage
 .turbo
 .expo
+apps/app/.expo
+apps/app/expo-env.d.ts
+apps/app/AGENTS.md

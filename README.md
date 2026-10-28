@@ -8,7 +8,7 @@ Web first at **https://xp.example.com**, iOS later from the same codebase.
 
 ```
 apps/
-  app/           Expo app (web now, iOS later)          - build step 5
+  app/           Expo Router + Tamagui app (web now, iOS later)
   api/           Azure Functions API (TypeScript)
 packages/
   core/          Domain types, zod schemas, status and polling rules
@@ -26,21 +26,28 @@ Requires Node 22+ and pnpm (via Corepack).
 ```sh
 corepack enable
 pnpm install
+pnpm dev         # app on http://localhost:8081, API on http://localhost:7071/api, both hot-reload
+```
+
+Open http://localhost:8081 and add a flight. Everything runs on the **mock flight provider**, so no real API units are spent: any flight number gets a stable sample route and times, numbers ending in `D` run 45 minutes late, and numbers ending in `X` are cancelled. Saved flights live in memory, so restarting the API clears them.
+
+Other commands:
+
+```sh
 pnpm test        # all packages
 pnpm typecheck
 pnpm lint
-pnpm build
+pnpm format      # Prettier (CI runs format:check)
+pnpm build       # API bundle + web export
 ```
 
-Run the API locally (needs [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) v4):
+To run the API under the real Azure Functions host instead of the dev server (needs [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) v4):
 
 ```sh
 cp apps/api/local.settings.example.json apps/api/local.settings.json
 pnpm --filter @xplorio/api build
-cd apps/api && func start     # GET http://localhost:7071/api/health
+cd apps/api && func start
 ```
-
-Development uses the **mock flight provider** by default (`FLIGHT_PROVIDER=mock`), so no real API units are spent. Flight numbers ending in `X` come back cancelled and ones ending in `D` run 45 minutes late.
 
 ## Build order
 
@@ -48,7 +55,7 @@ Development uses the **mock flight provider** by default (`FLIGHT_PROVIDER=mock`
 2. Infrastructure (Bicep, OIDC deploys): code in infra/, see infra/README.md
 3. Core and providers (AeroDataBox adapter)
 4. Auth (Entra External ID, email one-time code, invite-only)
-5. Add and view a flight - first deploy to xp.example.com
+5. Add and view a flight (screens built on mock data; deploy pending)
 6. Polling, cache and budget guard
 7. Map and history
 8. Alerts (Web Push)

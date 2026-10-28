@@ -1,4 +1,4 @@
-import type { AddFlightRequest, Flight, TrackedFlight } from "@xplorio/core";
+import type { AddFlightRequest, TrackedFlightView } from "@xplorio/core";
 
 export interface ApiClientOptions {
   /** e.g. "https://xp.example.com/api" in production, "http://localhost:7071/api" locally. */
@@ -17,11 +17,6 @@ export class ApiError extends Error {
   }
 }
 
-export interface TrackedFlightWithStatus {
-  tracked: TrackedFlight;
-  flight: Flight | null;
-}
-
 /** Thin typed wrapper over fetch. Endpoints are filled in as the API grows (build steps 4-8). */
 export function createApiClient({ baseUrl, getAccessToken }: ApiClientOptions) {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -33,16 +28,23 @@ export function createApiClient({ baseUrl, getAccessToken }: ApiClientOptions) {
 
     const res = await fetch(`${baseUrl}${path}`, { ...init, headers });
     if (!res.ok) {
-      throw new ApiError(res.status, `${init.method ?? "GET"} ${path} failed with ${res.status}`);
+      // The API returns { error: "message" } for expected failures (bad input, not found).
+      const detail = await res.json().catch(() => null);
+      const message =
+        detail && typeof detail.error === "string"
+          ? detail.error
+          : `${init.method ?? "GET"} ${path} failed with ${res.status}`;
+      throw new ApiError(res.status, message);
     }
     return (res.status === 204 ? undefined : await res.json()) as T;
   }
 
   return {
     health: () => request<{ status: string; time: string }>("/health"),
-    listFlights: () => request<TrackedFlightWithStatus[]>("/flights"),
+    listFlights: () => request<TrackedFlightView[]>("/flights"),
+    getFlight: (id: string) => request<TrackedFlightView>(`/flights/${encodeURIComponent(id)}`),
     addFlight: (body: AddFlightRequest) =>
-      request<TrackedFlightWithStatus>("/flights", { method: "POST", body: JSON.stringify(body) }),
+      request<TrackedFlightView>("/flights", { method: "POST", body: JSON.stringify(body) }),
     removeFlight: (id: string) =>
       request<void>(`/flights/${encodeURIComponent(id)}`, { method: "DELETE" }),
   };
