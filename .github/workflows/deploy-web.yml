@@ -1,0 +1,51 @@
+name: Deploy web
+
+# Until build step 5 this publishes the placeholder page, so the custom domain and its
+# certificate can be set up early. Step 5 swaps the folder for the Expo web export.
+
+on:
+  push:
+    branches: [main]
+    paths: ["apps/app/**", ".github/workflows/deploy-web.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Static Web Apps
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # The deployment token is fetched at run time with the OIDC login, so it is never stored in GitHub.
+      - name: Get deployment token
+        id: token
+        run: |
+          token=$(az staticwebapp secrets list -g "${{ vars.AZURE_RESOURCE_GROUP }}" -n swa-xplorio --query properties.apiKey -o tsv)
+          echo "::add-mask::$token"
+          echo "value=$token" >> "$GITHUB_OUTPUT"
+
+      - uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.token.outputs.value }}
+          action: upload
+          app_location: apps/app/placeholder
+          skip_app_build: true
+          skip_api_build: true

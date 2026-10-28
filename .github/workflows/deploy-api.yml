@@ -1,0 +1,93 @@
+name: Deploy API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "packages/core/**"
+      - "packages/providers/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run test typecheck --filter=@xplorio/api...
+      - run: pnpm --filter @xplorio/api build
+
+      # The bundle has every dependency inlined, so the package needs no node_modules.
+      - name: Assemble package
+        working-directory: apps/api
+        run: |
+          mkdir -p ../../package
+          cp -r host.json dist ../../package/
+          node -e "require('fs').writeFileSync('../../package/package.json', JSON.stringify({name:'xplorio-api',private:true,type:'module',main:'dist/index.js'}, null, 2))"
+          cd ../../package && zip -qr ../api.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-package
+          path: api.zip
+          retention-days: 7
+
+  deploy:
+    name: Deploy to Azure Functions
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: api-package
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Find the function app
+        id: app
+        run: |
+          name=$(az functionapp list -g "${{ vars.AZURE_RESOURCE_GROUP }}" --query "[0].name" -o tsv)
+          host=$(az functionapp show -g "${{ vars.AZURE_RESOURCE_GROUP }}" -n "$name" --query defaultHostName -o tsv)
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy package
+        run: |
+          az functionapp deployment source config-zip \
+            -g "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            -n "${{ steps.app.outputs.name }}" \
+            --src api.zip
+
+      - name: Smoke test /api/health
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS "https://${{ steps.app.outputs.host }}/api/health"; then exit 0; fi
+            echo "not ready yet ($i/10)"; sleep 15
+          done
+          exit 1
