@@ -7,7 +7,7 @@ Everything Xplorio runs on, as Bicep, in a **dedicated Azure subscription** with
 |                      | prod                                                      | test                                |
 | -------------------- | --------------------------------------------------------- | ----------------------------------- |
 | Resource group       | `rg-xplorio-prod`                                         | `rg-xplorio-test`                   |
-| URL                  | `xp.example.com`                                        | `xp-test.example.com`             |
+| URL                  | `xp.example.com`                                          | `xp-test.example.com`               |
 | Parameters           | `env/prod.bicepparam`                                     | `env/test.bicepparam`               |
 | Cosmos DB            | Free tier (one per subscription)                          | Serverless, cents a month           |
 | Flight data          | Mock now, AeroDataBox from step 3                         | Always mock, never spends API units |

@@ -2,7 +2,7 @@
 
 A personal flight tracker: add a flight by number and date, watch its live status and route, and get alerts for delays, gate changes, departure and landing.
 
-> **Project archived (October 2026).** Xplorio was built over a short sprint as a hands-on cloud and DevOps project and is no longer in development. All Azure resources and the dedicated subscription have been deleted, so `xp.example.com` and the API are offline. The code is kept here as a reference.
+> **Project archived (October 2026).** Xplorio was built over a short sprint as a hands-on cloud and DevOps project and is no longer in development. All Azure resources and the dedicated subscription have been deleted, so the website and API are offline. The code is kept here as a reference.
 
 ## What this project demonstrates
 
